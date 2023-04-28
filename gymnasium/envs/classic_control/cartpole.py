@@ -135,42 +135,50 @@ class CartPoleEnv(gym.Env[np.ndarray, Union[int, np.ndarray]]):
         ), f"{action!r} ({type(action)}) invalid"
         assert self.state is not None, "Call reset before using step method."
         x, x_dot, theta, theta_dot = self.state
-        force = self.force_mag if action == 1 else -self.force_mag
-        costheta = math.cos(theta)
-        sintheta = math.sin(theta)
+        if not self.fallen:
+            force = self.force_mag if action == 1 else -self.force_mag
+            costheta = math.cos(theta)
+            sintheta = math.sin(theta)
 
-        # For the interested reader:
-        # https://coneural.org/florian/papers/05_cart_pole.pdf
-        temp = (
-            force + self.polemass_length * theta_dot**2 * sintheta
-        ) / self.total_mass
-        thetaacc = (self.gravity * sintheta - costheta * temp) / (
-            self.length * (4.0 / 3.0 - self.masspole * costheta**2 / self.total_mass)
-        )
-        xacc = temp - self.polemass_length * thetaacc * costheta / self.total_mass
+            # For the interested reader:
+            # https://coneural.org/florian/papers/05_cart_pole.pdf
+            temp = (
+                force + self.polemass_length * theta_dot**2 * sintheta
+            ) / self.total_mass
+            thetaacc = (self.gravity * sintheta - costheta * temp) / (
+                self.length * (4.0 / 3.0 - self.masspole * costheta**2 / self.total_mass)
+            )
+            xacc = temp - self.polemass_length * thetaacc * costheta / self.total_mass
 
-        if self.kinematics_integrator == "euler":
-            x = x + self.tau * x_dot
-            x_dot = x_dot + self.tau * xacc
-            theta = theta + self.tau * theta_dot
-            theta_dot = theta_dot + self.tau * thetaacc
-        else:  # semi-implicit euler
-            x_dot = x_dot + self.tau * xacc
-            x = x + self.tau * x_dot
-            theta_dot = theta_dot + self.tau * thetaacc
-            theta = theta + self.tau * theta_dot
+            if self.kinematics_integrator == "euler":
+                x = x + self.tau * x_dot
+                x_dot = x_dot + self.tau * xacc
+                theta = theta + self.tau * theta_dot
+                theta_dot = theta_dot + self.tau * thetaacc
+            else:  # semi-implicit euler
+                x_dot = x_dot + self.tau * xacc
+                x = x + self.tau * x_dot
+                theta_dot = theta_dot + self.tau * thetaacc
+                theta = theta + self.tau * theta_dot
 
         self.state = (x, x_dot, theta, theta_dot)
 
-        terminated = bool(
+        fallen = bool(
             x < -self.x_threshold
             or x > self.x_threshold
             or theta < -self.theta_threshold_radians
             or theta > self.theta_threshold_radians
         )
 
+        terminated = False
+
+        if fallen and self.fallen==False:
+            self.fallen=True
+
         if not terminated:
-            reward = 1.0
+            reward = 1
+            if self.fallen:
+                reward = 0
         elif self.steps_beyond_terminated is None:
             # Pole just fell!
             self.steps_beyond_terminated = 0
@@ -197,6 +205,7 @@ class CartPoleEnv(gym.Env[np.ndarray, Union[int, np.ndarray]]):
         options: Optional[dict] = None,
     ):
         super().reset(seed=seed)
+        self.fallen = False
         # Note that if you use custom reset bounds, it may lead to out-of-bound
         # state/observations.
         low, high = utils.maybe_parse_reset_bounds(
@@ -385,7 +394,6 @@ class CartPoleVectorEnv(VectorEnv):
             action
         ), f"{action!r} ({type(action)}) invalid"
         assert self.state is not None, "Call reset before using step method."
-
         x, x_dot, theta, theta_dot = self.state
         force = np.sign(action - 0.5) * self.force_mag
         costheta = np.cos(theta)
